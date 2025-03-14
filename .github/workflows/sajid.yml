@@ -17,8 +17,8 @@ jobs:
 
     - name: Build Docker Image
       run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/flask-app:latest .
-        docker push ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/test:latest .
+        docker push ${{ secrets.DOCKER_USERNAME }}/test:latest
 
     - name: Deploy to AWS EC2
       env:
@@ -31,10 +31,10 @@ jobs:
         ssh-keyscan ${{ secrets.HOST }} >> ~/.ssh/known_hosts
         ssh -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
           set -e  # Stop execution on any error
-          docker pull ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+          docker pull ${{ secrets.DOCKER_USERNAME }}/test:latest
           # Ensure no conflicts with existing container
-          docker stop flask-app-container || true
-          docker rm flask-app-container || true
+          docker stop test-container || true
+          docker rm test-container || true
           # Start new container
-          docker run -d --name flask-app-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+          docker run -d --name test-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/test:latest
         EOF
