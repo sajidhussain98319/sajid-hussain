@@ -2,22 +2,30 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ master ]  # Ensure this matches the main branch name in your repo
+    branches: 
+      - master  # Ensure this matches the main branch name in your repo
 
 jobs:
   build-and-deploy: 
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v2  # Checkout code from repository
 
     - name: Log in to Docker Hub
       run: |
+        # Log into Docker Hub using secrets for username and access token (with both read and write permissions)
         echo ${{ secrets.DOCKER_PASSWORD }} | docker login --username ${{ secrets.DOCKER_USERNAME }} --password-stdin
+        # Debugging: Verify login and display user info
+        docker info
 
     - name: Build Docker Image
       run: |
+        # Build Docker image and tag it with the Docker Hub username and latest tag
         docker build -t ${{ secrets.DOCKER_USERNAME }}/flask-app:latest .
+        # Debugging: List Docker images before pushing
+        docker images
+        # Push Docker image to Docker Hub
         docker push ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
 
     - name: Deploy to AWS EC2
@@ -25,7 +33,7 @@ jobs:
         SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         HOST: ${{ secrets.HOST }}
       run: |
-        # Set up SSH configuration
+        # Set up SSH configuration for deployment to AWS EC2 instance
         mkdir -p ~/.ssh
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
@@ -36,15 +44,22 @@ jobs:
         ssh -v -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
           set -e  # Stop execution on any error
 
-          # Pull latest Docker image
+          # Debugging: Verify Docker is installed and available
+          docker --version
+          docker info
+
+          # Pull the latest Docker image from Docker Hub
           docker pull ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
 
           # Ensure no conflicts with existing container
           docker stop flask-app-container || true
           docker rm flask-app-container || true
 
-          # Start new container
+          # Start a new Docker container in detached mode
           docker run -d --name flask-app-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+
+          # Debugging: List running containers to verify successful deployment
+          docker ps
         EOF
 
         echo "Deployment completed with verbose SSH logging."
