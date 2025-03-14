@@ -46,6 +46,9 @@ jobs:
         ssh -v -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
           set -e  # Stop execution on any error
 
+          # Add the ubuntu user to the docker group (so it can run docker commands without sudo)
+          sudo usermod -aG docker ubuntu
+
           # Pull the latest Docker image from Docker Hub
           docker pull ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
 
