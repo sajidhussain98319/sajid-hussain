@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-and-deploy: 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-app
 
     steps:
     - uses: actions/checkout@v2
@@ -17,8 +17,8 @@ jobs:
 
     - name: Build Docker Image
       run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/test:latest .
-        docker push ${{ secrets.DOCKER_USERNAME }}/test:latest
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/test-app:latest-app .
+        docker push ${{ secrets.DOCKER_USERNAME }}/test-app:latest-app
 
     - name: Deploy to AWS EC2
       env:
@@ -31,10 +31,10 @@ jobs:
         ssh-keyscan ${{ secrets.HOST }} >> ~/.ssh/known_hosts
         ssh -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
           set -e  # Stop execution on any error
-          docker pull ${{ secrets.DOCKER_USERNAME }}/test:latest
+          docker pull ${{ secrets.DOCKER_USERNAME }}/test-app:latest-app
           # Ensure no conflicts with existing container
-          docker stop test-container || true
-          docker rm test-container || true
+          docker stop test-app-container || true
+          docker rm test-app-container || true
           # Start new container
-          docker run -d --name test-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/test:latest
+          docker run -d --name test-app-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/test-app:latest-app
         EOF
