@@ -1,40 +1,68 @@
 name: CI/CD Pipeline
-   
+
 on:
   push:
-    branches: [ master ]  # Ensure this matches the main branch name in your repo
+    branches:
+      - master  # Ensure this matches your repository's main branch name
 
 jobs:
-  build-and-deploy: 
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+      # Step 1: Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Log in to Docker Hub
-      run: |
-        echo ${{ secrets.DOCKER_PASSWORD }} | docker login --username ${{ secrets.DOCKER_USERNAME }} --password-stdin
+      # Step 2: Set up Docker Buildx (improved builder)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker Image
-      run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/flask-app:latest .
-        docker push ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+      # Step 3: Log in to Docker Hub using the secrets stored in GitHub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Deploy to AWS EC2
-      env:
-        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        HOST: ${{ secrets.HOST }}
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan ${{ secrets.HOST }} >> ~/.ssh/known_hosts
-        ssh -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
-          set -e  # Stop execution on any error
-          docker pull ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
-          # Ensure no conflicts with existing container
-          docker stop flask-app-container || true
-          docker rm flask-app-container || true
-          # Start new container
-          docker run -d --name flask-app-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
-        EOF
+      # Step 4: Build and push Docker image using Docker Buildx
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+
+      # Step 5: Deploy the application to AWS EC2
+      - name: Deploy to AWS EC2
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          # Set up SSH for connecting to EC2
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Ensure the EC2 host is trusted
+          ssh-keyscan -H ${{ secrets.HOST }} >> ~/.ssh/known_hosts
+
+          # SSH into EC2 and deploy the new Docker image
+          ssh -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
+            set -e  # Exit on error
+
+            # Add the ubuntu user to the Docker group (if not already added)
+            sudo usermod -aG docker ubuntu || true
+
+            # Pull the updated Docker image from Docker Hub
+            docker pull ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+
+            # Stop and remove the previous container (if it exists)
+            docker stop flask-app-container || true
+            docker rm flask-app-container || true
+
+            # Run the updated Docker container
+            docker run -d --name flask-app-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+          EOF
+
+          echo "✅ Deployment to AWS EC2 completed successfully!"
