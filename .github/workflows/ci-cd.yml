@@ -1,0 +1,63 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - master  # Ensure this matches the main branch name in your repo
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Step 1: Checkout the code
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Step 2: Log in to Docker Hub using the secrets stored in GitHub
+    - name: Log in to Docker Hub
+      run: |
+        echo ${{ secrets.DOCKER_PASSWORD }} | docker login --username ${{ secrets.DOCKER_USERNAME }} --password-stdin
+
+    # Step 3: Build the Docker image and push it to Docker Hub
+    - name: Build Docker Image
+      run: |
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/flask-app:latest .
+        docker push ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+
+    # Step 4: Deploy the application to AWS EC2
+    - name: Deploy to AWS EC2
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        HOST: ${{ secrets.HOST }}
+      run: |
+        # Set up SSH configuration
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        
+        # Make sure the host can be reached (Add EC2 instance's SSH fingerprint to known_hosts)
+        ssh-keyscan -H ${{ secrets.HOST }} >> ~/.ssh/known_hosts
+
+        # Debugging: Run SSH in verbose mode to troubleshoot connection issues
+        echo "Attempting SSH connection with verbose output for troubleshooting..."
+
+        # SSH into EC2 and run deployment commands
+        ssh -v -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
+          set -e  # Stop execution on any error
+
+          # Add the ubuntu user to the docker group (so it can run docker commands without sudo)
+          sudo usermod -aG docker ubuntu
+
+          # Pull the latest Docker image from Docker Hub
+          docker pull ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+
+          # Ensure no conflicts with existing container
+          docker stop flask-app-container || true
+          docker rm flask-app-container || true
+
+          # Start the new Docker container
+          docker run -d --name flask-app-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+        EOF
+
+        echo "Deployment completed with verbose SSH logging."
