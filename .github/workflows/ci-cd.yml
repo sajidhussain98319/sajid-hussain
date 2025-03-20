@@ -1,46 +1,81 @@
 name: CI/CD Pipeline
-   
+
 on:
   push:
-    branches: [ master ]  # Trigger on master branch push
+    branches: [ master ]  # Trigger the pipeline on push to master branch
 
 jobs:
-  build-and-deploy: 
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      # Step 1: Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    # Use Docker login action with explicit secrets
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+      # Step 2: Set up Docker Buildx (for multi-platform builds and better caching)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    # Build and push Docker image
-    - name: Build Docker Image
-      run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/flask-app:latest .
-        docker push ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+      # Step 3: Log in to Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    # Deploy to AWS EC2
-    - name: Deploy to AWS EC2
-      env:
-        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        HOST: ${{ secrets.HOST }}
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan ${{ secrets.HOST }} >> ~/.ssh/known_hosts
-        ssh -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
-          set -e  # Stop execution on any error
-          docker pull ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
-          # Ensure no conflicts with existing container
-          docker stop flask-app-container || true
-          docker rm flask-app-container || true
-          # Start new container
-          docker run -d --name flask-app-container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
-        EOF
+      # Step 4: Build and push Docker image with lowercase Dockerfile reference
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./dockerfile   # Explicitly specify the lowercase Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+
+      # Step 5: Deploy to AWS EC2
+      - name: Deploy to AWS EC2
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST: ${{ secrets.HOST }}
+        run: |
+          echo "🚀 Preparing for EC2 deployment..."
+
+          # Set up SSH for EC2 connection
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.HOST }} >> ~/.ssh/known_hosts
+
+          # SSH into EC2 and deploy the Docker image
+          ssh -o "StrictHostKeyChecking=no" ubuntu@${{ secrets.HOST }} 'bash -s' << 'EOF'
+            set -e  # Exit on any error
+
+            echo "🚀 Connecting to EC2 and deploying the new Docker image..."
+
+            # Add ubuntu to Docker group (if not already added)
+            sudo usermod -aG docker ubuntu || true
+
+            # Pull the updated Docker image
+            echo "⚙ Pulling the latest Docker image..."
+            docker pull ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+
+            # Stop and remove any container using port 80
+            echo "⚙ Stopping and removing old containers..."
+            docker ps -q --filter "publish=80" | xargs -r docker stop
+            docker ps -aq --filter "publish=80" | xargs -r docker rm
+
+            # Clean up dangling images and unused resources
+            echo "🧹 Cleaning up Docker system..."
+            docker system prune -f
+
+            # Run the new container
+            echo "🚀 Running the new container..."
+            docker run -d -p 80:80 --name flask-app-container ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
+
+            # Verify the running container
+            echo "✅ Verifying deployment..."
+            docker ps
+          EOF
+
+          echo "✅ Deployment to AWS EC2 completed successfully!"
